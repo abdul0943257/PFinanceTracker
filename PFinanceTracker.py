@@ -62,3 +62,29 @@ def save(data):
     )
 
     temporary.replace(DATA_FILE)
+
+# Calculate monthly income, expenses, and net balance.
+def summary(data, month):
+    date.fromisoformat(month + "-01")
+
+    income = Decimal("0")
+    expenses = Decimal("0")
+    categories = {}
+
+    for item in data["transactions"]:
+        if item["date"][:7] != month:
+            continue
+
+        amount = money(item["amount"])
+
+        if item["type"] == "income":
+            income += amount
+        else:
+            expenses += amount
+            category = item["category"]
+
+            categories[category] = (
+                categories.get(category, Decimal("0")) + amount
+            )
+
+    return income, expenses, income - expenses, categories
