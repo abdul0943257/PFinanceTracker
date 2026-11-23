@@ -503,3 +503,12 @@ def export_trend_png(months, totals, fitted, prediction, rmse, filename="expense
         "Month",
         "Expenses",
     )
+
+# Read and validate numerical input from the keyboard.
+def number(prompt):
+    value = float(input(prompt))
+
+    if not math.isfinite(value):
+        raise ValueError("Enter a finite number.")
+
+    return value
