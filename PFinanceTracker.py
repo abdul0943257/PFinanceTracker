@@ -158,3 +158,36 @@ def analytical_balance(balance, contribution, annual_rate, months):
     growth = (1 + rate) ** months
 
     return balance * growth + contribution * (growth - 1) / rate
+
+# Calculate monthly savings needed using the bisection method.
+def required_contribution(balance, target, annual_rate, months):
+    if target < balance:
+        raise ValueError("Target must be at least the initial balance.")
+
+    if savings(balance, 0, annual_rate, months)[-1] >= target:
+        return 0.0, 0, 0.0
+
+    low = 0.0
+    high = max(1.0, target)
+
+    if savings(balance, high, annual_rate, months)[-1] < target:
+        raise ValueError("Could not bracket the target.")
+
+    iterations = 0
+
+    while high - low > 0.01 and iterations < 50:
+        middle = (low + high) / 2
+
+        if savings(balance, middle, annual_rate, months)[-1] >= target:
+            high = middle
+        else:
+            low = middle
+
+        iterations += 1
+
+    if high - low > 0.01:
+        raise ValueError("The search did not converge within 50 iterations.")
+
+    contribution = math.ceil(high * 100) / 100
+
+    return contribution, iterations, high - low
