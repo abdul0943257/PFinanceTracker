@@ -371,3 +371,95 @@ def write_csv(name, header, rows):
         writer = csv.writer(file)
         writer.writerow(header)
         writer.writerows(rows)
+
+# Convert the supplied path to a Path object and open the CSV for reading.
+def import_csv(path, data):
+    
+    # utf-8-sig also handles files that include a UTF-8 byte-order mark.
+    with Path(path).open(
+        "r",
+        newline="",
+        encoding="utf-8-sig",
+    ) as file:
+        # DictReader maps each CSV row to a dictionary using the header names.
+        reader = csv.DictReader(file)
+
+        # Check that all required columns are present.
+        # Strip spaces and ignore capitalization when checking the headers.
+        required = {"date", "category", "amount", "type"}
+        headers = {
+            name.strip().lower()
+            for name in (reader.fieldnames or [])
+        }
+
+        if not required.issubset(headers):
+            raise ValueError(
+                "CSV requires date, category, amount, and type columns."
+            )
+
+        # Count successfully imported transactions.
+        imported = 0
+
+        # Validate each CSV row with transaction() before adding it to the data.
+        for row in reader:
+            # Normalize column names so they match the required lowercase names.
+            normalized = {
+                key.strip().lower(): value
+                for key, value in row.items()
+            }
+
+            # Create a validated transaction from the CSV values.
+            item = transaction(
+                normalized["date"].strip(),
+                normalized["category"].strip(),
+                normalized["amount"].strip(),
+                normalized["type"].strip().lower(),
+            )
+
+            # Add the validated transaction to the in-memory data.
+            data["transactions"].append(item)
+            imported += 1
+
+    # Return the number of transactions added.
+    return imported
+
+# Calculate the selected month's totals and expense categories.
+def export_month_csv(data, month, directory=OUTPUT):
+    
+    # This keeps the exported figures consistent with the monthly summary.
+    income, expenses, net, categories = summary(data, month)
+
+    # Convert the output directory to a Path and create it if needed.
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+
+    # Build the output filename using the selected month.
+    path = directory / f"summary-{month}.csv"
+
+    # Open the CSV file for writing, preserving correct CSV newline handling.
+    with path.open(
+        "w",
+        newline="",
+        encoding="utf-8",
+    ) as file:
+        # Create a CSV writer and write the monthly report details.
+        writer = csv.writer(file)
+        writer.writerow(["Month", month])
+        writer.writerow(["Currency", data["currency"]])
+        writer.writerow(["Income", income])
+        writer.writerow(["Expenses", expenses])
+        writer.writerow(["Net cash flow", net])
+
+        # Add a blank row to separate the totals from category details.
+        writer.writerow([])
+        writer.writerow(["Category", "Expenses"])
+
+        # Write each expense category in alphabetical order.
+        for category in sorted(categories):
+            writer.writerow([
+                category,
+                categories[category],
+            ])
+
+    # Return the output path so the caller can display or reuse it.
+    return path
