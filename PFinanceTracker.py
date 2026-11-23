@@ -132,3 +132,18 @@ def expense_trend(data, start, end):
     )
 
     return months, totals, fitted, prediction, rmse
+
+# Simulate monthly savings with compound interest.
+def savings(balance, contribution, annual_rate, months):
+    if balance < 0 or contribution < 0 or annual_rate <= -1 or months < 1:
+        raise ValueError("Check the balance, deposit, rate, and number of months.")
+
+    rate = annual_rate / 12
+    balances = [balance]
+
+    for _ in range(months):
+        balances.append(
+            balances[-1] * (1 + rate) + contribution
+        )
+
+    return balances
