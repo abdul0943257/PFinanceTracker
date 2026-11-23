@@ -147,3 +147,14 @@ def savings(balance, contribution, annual_rate, months):
         )
 
     return balances
+
+# Calculate the savings balance using the compound-interest formula.
+def analytical_balance(balance, contribution, annual_rate, months):
+    rate = annual_rate / 12
+
+    if rate == 0:
+        return balance + contribution * months
+
+    growth = (1 + rate) ** months
+
+    return balance * growth + contribution * (growth - 1) / rate
