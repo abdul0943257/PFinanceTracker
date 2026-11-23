@@ -1,1 +1,1 @@
-print("Testing remote connection")
+print("Welcome to Personal Finance Tracker")
