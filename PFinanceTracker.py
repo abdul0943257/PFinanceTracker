@@ -94,3 +94,41 @@ def next_month(month):
     year, number = map(int, month.split("-"))
 
     return f"{year + (number == 12):04d}-{number % 12 + 1:02d}"
+
+
+# Fit a linear regression model to monthly expenses.
+def expense_trend(data, start, end):
+    today_month = date.today().strftime("%Y-%m")
+
+    date.fromisoformat(start + "-01")
+    date.fromisoformat(end + "-01")
+
+    if start > end or end >= today_month:
+        raise ValueError("Use completed months in date order.")
+
+    months = []
+    month = start
+
+    while month <= end:
+        months.append(month)
+        month = next_month(month)
+
+    if len(months) < 3:
+        raise ValueError("At least three consecutive complete months are required.")
+
+    totals = np.array([
+        float(summary(data, m)[1]) for m in months
+    ])
+
+    x = np.arange(len(months))
+
+    slope, intercept = np.polyfit(x, totals, 1)
+
+    fitted = slope * x + intercept
+    prediction = float(slope * len(months) + intercept)
+
+    rmse = float(
+        np.sqrt(np.mean((totals - fitted) ** 2))
+    )
+
+    return months, totals, fitted, prediction, rmse
