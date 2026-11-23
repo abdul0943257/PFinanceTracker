@@ -33,3 +33,19 @@ def money(value):
         raise ValueError("Enter a positive amount with at most two decimal places.")
 
     return value
+
+from datetime import date
+
+# Check each transaction before saving.
+def transaction(day, category, amount, kind):
+    date.fromisoformat(day)
+
+    if not category.strip() or kind not in ("income", "expense"):
+        raise ValueError("Enter a category and use income or expense as the type.")
+
+    return dict(
+        date=day,
+        category=category.strip(),
+        amount=str(money(amount)),
+        type=kind
+    )
