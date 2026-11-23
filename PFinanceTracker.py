@@ -237,3 +237,55 @@ def required_contribution(balance, target, annual_rate, months):
     search_width = (high_cents - low_cents) / 100
 
     return contribution, iterations, search_width
+
+# Simulate five years of investment growth using random returns.
+def monte_carlo(balance, contribution, annual_return, volatility, runs=1000, seed=None):
+    # Validate the model inputs before running the simulations.
+    if (
+        isinstance(runs, bool)
+        or not isinstance(runs, int)
+        or runs < 1000
+    ):
+        raise ValueError("Runs must be an integer of at least 1,000.")
+
+    if (
+        not np.isfinite(balance)
+        or not np.isfinite(contribution)
+        or not np.isfinite(annual_return)
+        or not np.isfinite(volatility)
+    ):
+        raise ValueError("All numeric values must be finite.")
+
+    if balance < 0 or contribution < 0:
+        raise ValueError("Balance and contribution cannot be negative.")
+
+    if volatility < 0:
+        raise ValueError("Volatility cannot be negative.")
+
+    # Use a dedicated random-number generator for reproducible results.
+    rng = np.random.default_rng(seed)
+
+    # Each row represents one simulation; there are 61 points for 60 months
+    # plus the starting balance at month zero.
+    paths = np.empty((runs, 61), dtype=float)
+    paths[:, 0] = balance
+
+    monthly_mean = annual_return / 12
+    monthly_volatility = volatility / np.sqrt(12)
+
+    # Simulate five years of monthly investment growth.
+    for month in range(60):
+        monthly_returns = rng.normal(
+            monthly_mean,
+            monthly_volatility,
+            size=runs,
+        )
+
+        # Limit each month's loss to 100% of the invested balance.
+        paths[:, month + 1] = (
+            paths[:, month] * np.maximum(0.0, 1.0 + monthly_returns)
+            + contribution
+        )
+
+    # Return the 5th, 50th, and 95th percentiles across all simulations.
+    return np.percentile(paths, [5, 50, 95], axis=0)
