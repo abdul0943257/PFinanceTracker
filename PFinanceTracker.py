@@ -88,3 +88,9 @@ def summary(data, month):
             )
 
     return income, expenses, income - expenses, categories
+
+# Calculate the next calendar month.
+def next_month(month):
+    year, number = map(int, month.split("-"))
+
+    return f"{year + (number == 12):04d}-{number % 12 + 1:02d}"
