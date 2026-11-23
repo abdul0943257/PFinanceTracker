@@ -512,3 +512,251 @@ def number(prompt):
         raise ValueError("Enter a finite number.")
 
     return value
+
+def main():
+    # Load saved tracker data if it exists; otherwise create a new data file.
+    if DATA_FILE.exists():
+        data = json.loads(DATA_FILE.read_text(encoding="utf-8"))
+    else:
+        # Ask for the currency label when setting up the tracker for the first time.
+        currency = input("Currency label (for example USD or KES): ").strip()
+        if not currency:
+            print("A currency label is required.")
+            return
+
+        # Initialize the expected data structure and save it.
+        data = {
+            "currency": currency,
+            "transactions": [],
+            "budgets": {},
+        }
+        save(data)
+
+    # Keep the selected currency available for displaying amounts.
+    currency = data["currency"]
+
+    # Repeat the menu until the user chooses to quit.
+    while True:
+        print("\nPERSONAL FINANCE TRACKER")
+        print("1. Add transaction")
+        print("2. Import transactions from CSV")
+        print("3. Monthly summary")
+        print("4. Export monthly summary to CSV")
+        print("5. Expense trend")
+        print("6. Savings target")
+        print("7. Monte Carlo simulation")
+        print("8. Investment allocation")
+        print("0. Quit")
+
+        # Read the user's menu selection.
+        choice = input("Choose: ").strip()
+
+        try:
+            # Exit the menu loop and end the program.
+            if choice == "0":
+                break
+
+            elif choice == "1":
+                # Validate a new transaction, add it to the data, and save it.
+                item = transaction(
+                    input("Date (YYYY-MM-DD): ").strip(),
+                    input("Category: ").strip(),
+                    input("Amount: ").strip(),
+                    input("Type (income/expense): ").strip().lower(),
+                )
+                data["transactions"].append(item)
+                save(data)
+                print("Transaction added.")
+
+            elif choice == "2":
+                # Import transactions from a CSV file and save the updated data.
+                count = import_csv(input("CSV path: ").strip(), data)
+                save(data)
+                print(f"Imported {count} transactions.")
+
+            elif choice == "3":
+                # Calculate and display the selected month's financial summary.
+                month = input("Month (YYYY-MM): ").strip()
+                income, expenses, net, categories = summary(data, month)
+
+                print(f"\nCurrency: {currency}")
+                print(f"Income:   {income:.2f}")
+                print(f"Expenses: {expenses:.2f}")
+                print(f"Net:      {net:.2f}")
+
+                # Show expense totals grouped by category.
+                for category, total in sorted(categories.items()):
+                    print(f"{category}: {total:.2f}")
+
+            elif choice == "4":
+                # Export the selected month's totals and category expenses to CSV.
+                month = input("Month (YYYY-MM): ").strip()
+                path = export_month_csv(data, month)
+                print(f"Monthly report saved to: {path}")
+
+            elif choice == "5":
+                # Ask for a range of completed months to analyze.
+                start = input("First complete month (YYYY-MM): ").strip()
+                end = input("Last complete month (YYYY-MM): ").strip()
+
+                # Calculate historical expenses, fitted trend, forecast, and error.
+                months, totals, fitted, prediction, rmse = expense_trend(
+                    data, start, end
+                )
+
+                # Display the forecast for the month after the selected range.
+                forecast_month = next_month(months[-1])
+                print(
+                    f"Projected expenses for {forecast_month}: "
+                    f"{prediction:.2f} {currency}"
+                )
+                print(f"Trend RMSE: {rmse:.2f}")
+
+                # Export a chart of the historical trend and forecast.
+                path = export_trend_png(
+                    months, totals, fitted, prediction, rmse, data
+                )
+                print(f"Trend chart saved to: {path}")
+
+            elif choice == "6":
+                # Collect savings inputs and convert the annual percentage to a rate.
+                balance = money(input("Initial balance: ").strip())
+                target = money(input("Savings target: ").strip())
+                annual_rate = (
+                    decimal_value(
+                        input("Annual interest rate (percent): ").strip()
+                    )
+                    / Decimal("100")
+                )
+                months_to_save = int(input("Months until deadline: ").strip())
+
+                # Calculate the monthly contribution needed to reach the target.
+                contribution, iterations, width = required_contribution(
+                    balance, target, annual_rate, months_to_save
+                )
+
+                # Generate the balance at the start and end of each month.
+                balances = savings(
+                    balance,
+                    money(contribution),
+                    annual_rate,
+                    months_to_save,
+                )
+
+                # Show the contribution, projected result, and search details.
+                print(f"Monthly contribution: {contribution:.2f} {currency}")
+                print(f"Projected final balance: {balances[-1]:.2f} {currency}")
+                print(f"Search iterations: {iterations}")
+                print(f"Search interval width: {width:.2f}")
+
+                # Optionally export the monthly schedule and its chart.
+                if input("Export savings schedule and chart? (y/n): ").strip().lower() == "y":
+                    write_csv(
+                        "savings.csv",
+                        ["month", f"balance_{currency}"],
+                        enumerate(balances),
+                    )
+
+                    # Plot the savings balance for each month.
+                    plt.figure()
+                    plt.plot(
+                        range(len(balances)),
+                        [float(value) for value in balances],
+                    )
+
+                    # Label and save the chart using the chart helper.
+                    chart_path = finish_chart(
+                        "savings.png",
+                        "Savings balance schedule",
+                        "Month",
+                        currency,
+                    )
+                    print(f"Savings files saved in: {OUTPUT}")
+                    print(f"Chart saved to: {chart_path}")
+
+            elif choice == "7":
+                # Run simulations using the entered balance, contribution, return, and volatility.
+                bands = monte_carlo(
+                    number("Initial balance: "),
+                    number("Monthly contribution: "),
+                    number("Expected annual return (percent): ") / 100,
+                    number("Annual volatility (percent): ") / 100,
+                )
+
+                # Display the final 5th, 50th, and 95th percentile balances.
+                print(
+                    "Final balance percentiles (5th, 50th, 95th):",
+                    np.round(bands[:, -1], 2),
+                    currency,
+                )
+
+                # Plot the percentile range and median across all simulated months.
+                plt.figure()
+                months = range(bands.shape[1])
+                plt.fill_between(
+                    months,
+                    bands[0],
+                    bands[2],
+                    alpha=0.3,
+                    label="5th–95th percentiles",
+                )
+                plt.plot(months, bands[1], label="Median")
+                plt.legend()
+
+                # Label and save the simulation chart.
+                chart_path = finish_chart(
+                    "monte_carlo.png",
+                    "Five-year wealth simulation",
+                    "Month",
+                    currency,
+                )
+                print(f"Simulation chart saved to: {chart_path}")
+
+            elif choice == "8":
+                # Ask for the investment amount and gather inputs for each asset.
+                amount = number("Amount to allocate: ")
+                returns = []
+                risks = []
+                caps = []
+
+                # Collect the expected return, risk score, and maximum allocation per asset.
+                for asset in ("Cash", "Bonds", "Stocks"):
+                    print(f"\n{asset}")
+                    returns.append(
+                        number("Expected annual return (percent): ") / 100
+                    )
+                    risks.append(number("Risk score: "))
+                    caps.append(
+                        number("Maximum allocation (percent): ") / 100
+                    )
+
+                # Gather the overall risk limit and minimum cash reserve.
+                risk_limit = number("Maximum weighted risk score: ")
+                cash_minimum = number("Minimum cash reserve: ")
+
+                # Calculate the allocation that satisfies the supplied constraints.
+                allocation = optimize_allocation(
+                    amount,
+                    returns,
+                    risks,
+                    caps,
+                    risk_limit,
+                    cash_minimum,
+                )
+
+                # Display the allocated amount for each asset.
+                for asset, value in zip(("Cash", "Bonds", "Stocks"), allocation):
+                    print(f"{asset}: {value:.2f} {currency}")
+
+            else:
+                # Handle menu selections that do not match an available option.
+                print("Choose a number from the menu.")
+
+        # Show expected input, calculation, file, or data errors without exiting.
+        except (ValueError, ArithmeticError, OSError, KeyError) as error:
+            print(f"Error: {error}")
+
+
+# Start the tracker only when this file is run directly.
+if __name__ == "__main__":
+    main()
