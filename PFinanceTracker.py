@@ -15,7 +15,7 @@ import csv
 import json
 import math
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation, ROUND_CEILING
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -26,6 +26,19 @@ from scipy.optimize import linprog
 # Import data files.
 DATA_FILE = Path(__file__).with_name("finance_data.json")
 OUTPUT = Path(__file__).with_name("finance_exports")
+ZERO = Decimal("0")
+
+
+def decimal_value(value):
+    try:
+        result = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError) as error:
+        raise ValueError("Enter a valid numeric value.") from error
+
+    if not result.is_finite():
+        raise ValueError("Enter a finite numeric value.")
+
+    return result
 
 # Validate money amounts and avoid rounding errors.
 def money(value):
@@ -161,33 +174,66 @@ def analytical_balance(balance, contribution, annual_rate, months):
 
 # Calculate monthly savings needed using the bisection method.
 def required_contribution(balance, target, annual_rate, months):
-    if target < balance:
-        raise ValueError("Target must be at least the initial balance.")
+    # Convert all monetary and rate values to validated Decimal values.
+    balance = money(balance)
+    target = money(target)
+    annual_rate = decimal_value(annual_rate)
 
-    if savings(balance, 0, annual_rate, months)[-1] >= target:
+    # The target cannot be negative and cannot be lower than the balance.
+    if target < ZERO:
+        raise ValueError("The target cannot be negative.")
+    if target < balance:
         return 0.0, 0, 0.0
 
-    low = 0.0
-    high = max(1.0, target)
+    # The annual rate must be greater than -100%, and months must be positive.
+    if annual_rate <= Decimal("-1"):
+        raise ValueError("Annual rate must be greater than -100%.")
+    if isinstance(months, bool) or not isinstance(months, int) or months < 1:
+        raise ValueError("Months must be a positive integer.")
 
-    if savings(balance, high, annual_rate, months)[-1] < target:
-        raise ValueError("Could not bracket the target.")
+    # Search in whole cents to avoid floating-point rounding errors.
+    low_cents = 0
+    high_cents = max(
+        100,
+        int((target * 100).to_integral_value(rounding=ROUND_CEILING)),
+    )
+
+    # Expand the upper bound until it is large enough to reach the target.
+    while savings(
+        balance,
+        Decimal(high_cents) / 100,
+        annual_rate,
+        months,
+    )[-1] < target:
+        high_cents *= 2
+        if high_cents > 10_000_000_000:
+            raise ValueError("Could not bracket the target.")
 
     iterations = 0
 
-    while high - low > 0.01 and iterations < 50:
-        middle = (low + high) / 2
+    # Narrow the range between the smallest and largest feasible amounts.
+    while high_cents - low_cents > 1 and iterations < 50:
+        middle_cents = (low_cents + high_cents) // 2
+        middle_contribution = Decimal(middle_cents) / 100
 
-        if savings(balance, middle, annual_rate, months)[-1] >= target:
-            high = middle
+        if savings(
+            balance,
+            middle_contribution,
+            annual_rate,
+            months,
+        )[-1] >= target:
+            high_cents = middle_cents
         else:
-            low = middle
+            low_cents = middle_cents
 
         iterations += 1
 
-    if high - low > 0.01:
+    # Stop if the bisection search did not converge within 50 iterations.
+    if high_cents - low_cents > 1:
         raise ValueError("The search did not converge within 50 iterations.")
 
-    contribution = math.ceil(high * 100) / 100
+    # Convert cents back to dollars and report the remaining search width.
+    contribution = high_cents / 100
+    search_width = (high_cents - low_cents) / 100
 
-    return contribution, iterations, high - low
+    return contribution, iterations, search_width
