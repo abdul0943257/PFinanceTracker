@@ -357,3 +357,17 @@ def optimize_allocation(amount, returns, risks, caps, risk_limit, cash_minimum):
         raise ValueError("The solver returned an invalid allocation.")
 
     return allocation
+
+# Export directory
+def write_csv(name, header, rows):
+    # Create the export directory if it does not already exist.
+    OUTPUT.mkdir(parents=True, exist_ok=True)
+
+    with (OUTPUT / name).open(
+        "w",
+        newline="",
+        encoding="utf-8",
+    ) as file:
+        writer = csv.writer(file)
+        writer.writerow(header)
+        writer.writerows(rows)
