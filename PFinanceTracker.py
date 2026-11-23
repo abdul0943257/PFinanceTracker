@@ -23,7 +23,9 @@ import numpy as np
 from scipy.optimize import linprog
 
 
-from decimal import Decimal
+# Import data files.
+DATA_FILE = Path(__file__).with_name("finance_data.json")
+OUTPUT = Path(__file__).with_name("finance_exports")
 
 # Validate money amounts and avoid rounding errors.
 def money(value):
@@ -49,3 +51,14 @@ def transaction(day, category, amount, kind):
         amount=str(money(amount)),
         type=kind
     )
+
+# Save transactions and budgets to a JSON file.
+def save(data):
+    temporary = DATA_FILE.with_suffix(".tmp")
+
+    temporary.write_text(
+        json.dumps(data, indent=2),
+        encoding="utf-8"
+    )
+
+    temporary.replace(DATA_FILE)
