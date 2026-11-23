@@ -463,3 +463,43 @@ def export_month_csv(data, month, directory=OUTPUT):
 
     # Return the output path so the caller can display or reuse it.
     return path
+
+# Label and save financial charts as PNG images.
+def finish_chart(name, title, xlabel, ylabel):
+    # Create the output folder if it does not exist yet.
+    OUTPUT.mkdir(parents=True, exist_ok=True)
+
+    # Add labels and format the current Matplotlib figure.
+    plt.title(title)
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.xticks(rotation=30)
+    plt.tight_layout()
+
+    # Save the chart as a PNG file and close the figure to free resources.
+    path = OUTPUT / name
+    plt.savefig(path)
+    plt.close()
+
+    return path
+
+
+def export_trend_png(months, totals, fitted, prediction, rmse, filename="expense-trend.png"):
+    # Add the forecast month so it can be shown after the historical data.
+    forecast_month = next_month(months[-1])
+    chart_months = months + [forecast_month]
+    trend_values = list(fitted) + [prediction]
+
+    # Plot actual monthly expenses and the fitted trend with its forecast.
+    plt.figure()
+    plt.plot(months, totals, "o-", label="Actual expenses")
+    plt.plot(chart_months, trend_values, "--", label="Trend and forecast")
+    plt.scatter([forecast_month], [prediction], label="Forecast")
+
+    # Save the chart using the shared chart-export helper.
+    return finish_chart(
+        filename,
+        f"Expense trend (RMSE: {rmse:.2f})",
+        "Month",
+        "Expenses",
+    )
