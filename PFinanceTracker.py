@@ -289,3 +289,71 @@ def monte_carlo(balance, contribution, annual_return, volatility, runs=1000, see
 
     # Return the 5th, 50th, and 95th percentiles across all simulations.
     return np.percentile(paths, [5, 50, 95], axis=0)
+
+# Optimize investment allocation using linear programming.
+def optimize_allocation(amount, returns, risks, caps, risk_limit, cash_minimum):
+    # Validate the overall investment amount and risk settings.
+    if not np.isfinite(amount) or amount <= 0:
+        raise ValueError("Investment amount must be a positive finite number.")
+
+    if not np.isfinite(cash_minimum) or not 0 <= cash_minimum <= amount:
+        raise ValueError("Cash reserve must be between zero and the investment amount.")
+
+    if not np.isfinite(risk_limit) or risk_limit < 0:
+        raise ValueError("Risk limit must be a nonnegative finite number.")
+
+    # Cash, bonds, and stocks must each provide a return, risk, and cap.
+    if not (
+        len(returns) == len(risks)
+        and len(risks) == len(caps)
+        and len(caps) == 3
+    ):
+        raise ValueError("Provide three values: cash, bonds, and stocks.")
+
+    # Convert inputs to arrays and reject invalid or nonfinite values.
+    returns = np.asarray(returns, dtype=float)
+    risks = np.asarray(risks, dtype=float)
+    caps = np.asarray(caps, dtype=float)
+
+    if not (
+        np.all(np.isfinite(returns))
+        and np.all(np.isfinite(risks))
+        and np.all(np.isfinite(caps))
+    ):
+        raise ValueError("Returns, risks, and caps must contain finite numbers.")
+
+    if np.any(risks < 0):
+        raise ValueError("Risk values must be nonnegative.")
+
+    if np.any((caps < 0) | (caps > 1)):
+        raise ValueError("Allocation caps must be between 0 and 1.")
+
+    # Convert maximum fractions into dollar-based upper bounds.
+    bounds = [
+        (cash_minimum, caps[0] * amount),
+        (0, caps[1] * amount),
+        (0, caps[2] * amount),
+    ]
+
+    # Minimize negative expected return, which is equivalent to maximizing return.
+    result = linprog(
+        c=-returns,
+        A_ub=[risks],
+        b_ub=[risk_limit * amount],
+        A_eq=np.ones((1, 3)),
+        b_eq=[amount],
+        bounds=bounds,
+        method="highs",
+    )
+
+    # Return an allocation only when all constraints have been satisfied.
+    if not result.success:
+        raise ValueError("No allocation satisfies the investment constraints.")
+
+    allocation = result.x
+
+    # Guard against tiny solver rounding while avoiding a silent infeasible result.
+    if not np.isclose(allocation.sum(), amount, rtol=1e-7, atol=1e-7):
+        raise ValueError("The solver returned an invalid allocation.")
+
+    return allocation
