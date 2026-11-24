@@ -122,7 +122,16 @@ class DesktopTests(unittest.TestCase):
         self.assertIn("Stocks:", self.app.allocation_result.get())
         self.root.update_idletasks()
         for area in (self.app.trend_chart, self.app.savings_chart, self.app.sim_chart):
-            self.assertEqual(len(area.winfo_children()), 1)
+            self.assertEqual(len(area.winfo_children()), 2)
+            button = next(child for child in area.winfo_children() if isinstance(child, gui.ttk.Button))
+            path = Path(self.directory.name) / f"chart-{str(area).split('.')[-1]}.png"
+            with patch.object(gui.filedialog, "asksaveasfilename", return_value=str(path)):
+                button.invoke()
+            self.assertTrue(path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"))
+        with patch.object(gui.filedialog, "asksaveasfilename", return_value=""):
+            with patch.object(gui.Figure, "savefig") as save:
+                button.invoke()
+                save.assert_not_called()
 
     def test_invalid_csv_does_not_partially_import(self):
         path = Path(self.directory.name) / "import.csv"
