@@ -1,310 +1,308 @@
-"""
-Display the application in GUI
-"""
-# Import tools for files, dates, calculations, and charts.
-import csv
+"""Desktop interface for the personal finance tracker. Run: python FinanceAPP.py."""
+import copy
 import json
-import math
+import tkinter as tk
 from datetime import date
 from decimal import Decimal
-from pathlib import Path
+from tkinter import filedialog, messagebox, ttk
 
-import matplotlib.pyplot as plt
-import numpy as np
-from scipy.optimize import linprog
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
 
-DATA_FILE = Path(__file__).with_name("finance_data.json")
-OUTPUT = Path(__file__).with_name("finance_exports")
+import PFinanceTracker as finance
 
 
-# Keep money as decimal values to avoid rounding errors in summaries.
-def money(value):
-    value = Decimal(str(value))
-    if not value.is_finite() or value < 0 or value != value.quantize(Decimal("0.01")):
-        raise ValueError("Enter a positive amount with at most two decimal places.")
-    return value
+class FinanceApp(ttk.Frame):
+    def __init__(self, root):
+        super().__init__(root, padding=18)
+        self.root = root
+        root.title("Personal Finance Tracker")
+        root.geometry("1100x760")
+        root.minsize(900, 650)
+        self.pack(fill="both", expand=True)
+        self.data = self.load_data()
+        self.status = tk.StringVar(value="Ready. Your data stays on this computer.")
+        header = ttk.Frame(self)
+        header.pack(fill="x", pady=(0, 14))
+        ttk.Label(header, text="Personal Finance Tracker", font=("Segoe UI", 20, "bold")).pack(side="left")
+        self.currency = tk.StringVar(value=self.data["currency"])
+        ttk.Button(header, text="Save currency", command=self.guard(self.set_currency)).pack(side="right")
+        ttk.Entry(header, textvariable=self.currency, width=8).pack(side="right", padx=8)
+        ttk.Label(header, text="Currency:").pack(side="right")
+        self.tabs = ttk.Notebook(self)
+        self.tabs.pack(fill="both", expand=True)
+        self.build_transactions()
+        self.build_summary()
+        self.build_trend()
+        self.build_savings()
+        self.build_simulation()
+        self.build_allocation()
+        ttk.Label(self, textvariable=self.status, wraplength=1000).pack(anchor="w", pady=(12, 0))
+        self.refresh()
 
+    def load_data(self):
+        if not finance.DATA_FILE.exists():
+            return dict(currency="USD", transactions=[], budgets={})
+        data = json.loads(finance.DATA_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or not isinstance(data.get("currency"), str) or not data["currency"].strip():
+            raise ValueError("Saved data must contain a currency label.")
+        if not isinstance(data.get("transactions"), list) or not isinstance(data.get("budgets"), dict):
+            raise ValueError("Saved transactions or budgets have an invalid format.")
+        for item in data["transactions"]:
+            finance.transaction(item["date"], item["category"], item["amount"], item["type"])
+        for month, categories in data["budgets"].items():
+            date.fromisoformat(month + "-01")
+            for amount in categories.values():
+                finance.money(amount)
+        return data
 
-# Check each transaction before saving it.
-def transaction(day, category, amount, kind):
-    date.fromisoformat(day)
-    if not category.strip() or kind not in ("income", "expense"):
-        raise ValueError("Enter a category and use income or expense as the type.")
-    return dict(date=day, category=category.strip(), amount=str(money(amount)), type=kind)
+    def guard(self, action):
+        def run():
+            try:
+                action()
+            except (ValueError, ArithmeticError, OSError, KeyError, TypeError) as error:
+                messagebox.showerror("Check your input", str(error), parent=self.root)
+        return run
 
+    def tab(self, title):
+        frame = ttk.Frame(self.tabs, padding=16)
+        self.tabs.add(frame, text=title)
+        return frame
 
-# Save all entries in a local file that stays available after closing.
-def save(data):
-    temporary = DATA_FILE.with_suffix(".tmp")
-    temporary.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    temporary.replace(DATA_FILE)
+    def fields(self, parent, specs):
+        form = ttk.Frame(parent)
+        form.pack(fill="x", pady=(0, 12))
+        values = {}
+        for row, (label, default) in enumerate(specs):
+            ttk.Label(form, text=label).grid(row=row, column=0, sticky="w", padx=(0, 14), pady=4)
+            value = tk.StringVar(value=default)
+            ttk.Entry(form, textvariable=value, width=28).grid(row=row, column=1, sticky="w", pady=4)
+            values[label] = value
+        return values
 
+    def button(self, parent, label, action):
+        ttk.Button(parent, text=label, command=self.guard(action)).pack(anchor="w", pady=(0, 12))
 
-# Add up income and expenses for one month.
-def summary(data, month):
-    date.fromisoformat(month + "-01")
-    income = Decimal("0")
-    expenses = Decimal("0")
-    categories = {}
-    for item in data["transactions"]:
-        if item["date"][:7] != month:
-            continue
-        amount = money(item["amount"])
-        if item["type"] == "income":
-            income += amount
-        else:
-            expenses += amount
-            category = item["category"]
-            categories[category] = categories.get(category, Decimal("0")) + amount
-    return income, expenses, income - expenses, categories
+    def table(self, parent, columns):
+        frame = ttk.Frame(parent)
+        frame.pack(fill="both", expand=True)
+        table = ttk.Treeview(frame, columns=columns, show="headings", height=8)
+        for column in columns:
+            table.heading(column, text=column)
+            table.column(column, width=130, minwidth=80)
+        scroll = ttk.Scrollbar(frame, orient="vertical", command=table.yview)
+        table.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        table.pack(fill="both", expand=True)
+        return table
 
+    def commit(self, data):
+        finance.save(data)
+        self.data = data
+        self.refresh()
 
-# Work out the next calendar month.
-def next_month(month):
-    year, number = map(int, month.split("-"))
-    return f"{year + (number == 12):04d}-{number % 12 + 1:02d}"
-
-
-# Fit a straight line to consecutive, completed months.
-def expense_trend(data, start, end):
-    today_month = date.today().strftime("%Y-%m")
-    date.fromisoformat(start + "-01")
-    date.fromisoformat(end + "-01")
-    if start > end or end >= today_month:
-        raise ValueError("Use completed months in date order.")
-    months = []
-    month = start
-    while month <= end:
-        months.append(month)
-        month = next_month(month)
-    if len(months) < 3:
-        raise ValueError("At least three consecutive complete months are required.")
-    totals = np.array([float(summary(data, m)[1]) for m in months])
-    x = np.arange(len(months))
-    slope, intercept = np.polyfit(x, totals, 1)
-    fitted = slope * x + intercept
-    prediction = float(slope * len(months) + intercept)
-    rmse = float(np.sqrt(np.mean((totals - fitted) ** 2)))
-    return months, totals, fitted, prediction, rmse
-
-
-# Add interest first, then add the monthly deposit.
-def savings(balance, contribution, annual_rate, months):
-    if balance < 0 or contribution < 0 or annual_rate <= -1 or months < 1:
-        raise ValueError("Check the balance, deposit, rate, and number of months.")
-    rate = annual_rate / 12
-    balances = [balance]
-    for _ in range(months):
-        balances.append(balances[-1] * (1 + rate) + contribution)
-    return balances
-
-
-# Use the compound-interest formula to check the monthly simulation.
-def analytical_balance(balance, contribution, annual_rate, months):
-    rate = annual_rate / 12
-    if rate == 0:
-        return balance + contribution * months
-    growth = (1 + rate) ** months
-    return balance * growth + contribution * (growth - 1) / rate
-
-
-# Narrow the deposit range until it is no wider than one cent.
-def required_contribution(balance, target, annual_rate, months):
-    if target < 0:
-        raise ValueError("The target cannot be negative.")
-    if savings(balance, 0, annual_rate, months)[-1] >= target:
-        return 0.0, 0, 0.0
-    low = 0.0
-    high = max(1.0, target)
-    if savings(balance, high, annual_rate, months)[-1] < target:
-        raise ValueError("Could not bracket the target.")
-    iterations = 0
-    while high - low > 0.01 and iterations < 50:
-        middle = (low + high) / 2
-        if savings(balance, middle, annual_rate, months)[-1] >= target:
-            high = middle
-        else:
-            low = middle
-        iterations += 1
-    if high - low > 0.01:
-        raise ValueError("The search did not converge within 50 iterations.")
-    contribution = math.ceil(high * 100) / 100
-    return contribution, iterations, high - low
-
-
-# Simulate five years using normally distributed monthly returns.
-def monte_carlo(balance, contribution, annual_return, volatility, runs=1000, seed=None):
-    if runs < 1000 or volatility < 0 or balance < 0 or contribution < 0:
-        raise ValueError("Use at least 1,000 runs and nonnegative amounts and volatility.")
-    rng = np.random.default_rng(seed)
-    paths = np.empty((runs, 61))
-    paths[:, 0] = balance
-    for month in range(60):
-        returns = rng.normal(annual_return / 12, volatility / np.sqrt(12), runs)
-        # Limit losses to the amount invested; deposits arrive at month end.
-        paths[:, month + 1] = paths[:, month] * np.maximum(0, 1 + returns) + contribution
-    return np.percentile(paths, [5, 50, 95], axis=0)
-
-
-# Maximize expected return while keeping cash and risk within limits.
-def optimize_allocation(amount, returns, risks, caps, risk_limit, cash_minimum):
-    if amount <= 0 or not 0 <= cash_minimum <= amount or risk_limit < 0:
-        raise ValueError("Check the investment amount, cash reserve, and risk limit.")
-    if not (len(returns) == len(risks) == len(caps) == 3):
-        raise ValueError("Provide three values: cash, bonds, and stocks.")
-    if any(r < 0 for r in risks) or any(not 0 <= c <= 1 for c in caps):
-        raise ValueError("Risks must be nonnegative and caps must be between 0 and 1.")
-    result = linprog(
-        -np.array(returns),
-        A_ub=[risks], b_ub=[risk_limit * amount],
-        A_eq=[[1, 1, 1]], b_eq=[amount],
-        bounds=[(cash_minimum, caps[0] * amount), (0, caps[1] * amount),
-                (0, caps[2] * amount)], method="highs",
-    )
-    if not result.success:
-        raise ValueError("These constraints have no feasible allocation.")
-    return result.x
-
-
-# Write readable tables to CSV files.
-def write_csv(name, header, rows):
-    OUTPUT.mkdir(exist_ok=True)
-    with (OUTPUT / name).open("w", newline="", encoding="utf-8") as file:
-        writer = csv.writer(file)
-        writer.writerow(header)
-        writer.writerows(rows)
-
-
-# Label each chart and save it as a PNG image.
-def finish_chart(name, title, xlabel, ylabel):
-    OUTPUT.mkdir(exist_ok=True)
-    plt.title(title)
-    plt.xlabel(xlabel)
-    plt.ylabel(ylabel)
-    plt.xticks(rotation=30)
-    plt.tight_layout()
-    plt.savefig(OUTPUT / name)
-    plt.close()
-
-
-# Read a finite number from the keyboard.
-def number(prompt):
-    value = float(input(prompt))
-    if not math.isfinite(value):
-        raise ValueError("Enter a finite number.")
-    return value
-
-
-# Run the main menu until the user chooses to quit.
-def main():
-    if DATA_FILE.exists():
-        data = json.loads(DATA_FILE.read_text(encoding="utf-8"))
-    else:
-        currency = input("Currency label (for example USD or KES): ").strip()
+    def set_currency(self):
+        currency = self.currency.get().strip()
         if not currency:
-            raise ValueError("A currency label is required.")
-        data = dict(currency=currency, transactions=[], budgets={})
-        save(data)
-    currency = data["currency"]
-    while True:
-        print("\n1 Add transaction | 2 Import CSV | 3 Set budget | 4 Monthly summary")
-        print("5 Expense trend | 6 Savings target | 7 Monte Carlo | 8 Allocation | 0 Quit")
-        choice = input("Choose: ").strip()
+            raise ValueError("Enter a currency label, such as USD or KES.")
+        data = copy.deepcopy(self.data)
+        data["currency"] = currency
+        self.commit(data)
+        self.status.set("Currency label saved. Existing amounts are not converted.")
+
+    def build_transactions(self):
+        tab = self.tab("Transactions")
+        self.entry = self.fields(tab, [("Date (YYYY-MM-DD)", date.today().isoformat()), ("Category", ""), ("Amount", "")])
+        self.kind = tk.StringVar(value="expense")
+        ttk.Combobox(tab, textvariable=self.kind, values=("expense", "income"), state="readonly", width=25).pack(anchor="w", pady=(0, 10))
+        self.button(tab, "Add transaction", self.add_transaction)
+        self.button(tab, "Import CSV…", self.import_csv)
+        ttk.Label(tab, text="CSV columns: date, category, amount, type. Importing the same file again adds duplicates.").pack(anchor="w", pady=(0, 8))
+        self.transactions = self.table(tab, ("Date", "Category", "Type", "Amount"))
+
+    def add_transaction(self):
+        item = finance.transaction(self.entry["Date (YYYY-MM-DD)"].get().strip(), self.entry["Category"].get(), self.entry["Amount"].get().strip(), self.kind.get())
+        data = copy.deepcopy(self.data)
+        data["transactions"].append(item)
+        self.commit(data)
+        self.entry["Amount"].set("")
+        self.status.set("Transaction saved.")
+
+    def import_csv(self):
+        path = filedialog.askopenfilename(parent=self.root, filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
+        if path:
+            data = copy.deepcopy(self.data)
+            count = finance.import_csv(path, data)
+            self.commit(data)
+            self.status.set(f"Imported and saved {count} transactions.")
+
+    def build_summary(self):
+        tab = self.tab("Summary & budgets")
+        self.month = self.fields(tab, [("Month (YYYY-MM)", date.today().strftime("%Y-%m"))])["Month (YYYY-MM)"]
+        self.button(tab, "Refresh summary", self.refresh_summary)
+        self.totals = tk.StringVar()
+        ttk.Label(tab, textvariable=self.totals, font=("Segoe UI", 13, "bold")).pack(anchor="w", pady=(0, 12))
+        self.budget = self.fields(tab, [("Category", ""), ("Budget", "")])
+        self.button(tab, "Save category budget for this month", self.set_budget)
+        self.button(tab, "Export monthly summary CSV", self.export_summary)
+        self.categories = self.table(tab, ("Category", "Expenses", "Budget", "Status"))
+
+    def set_budget(self):
+        month = self.month.get().strip()
+        date.fromisoformat(month + "-01")
+        category = self.budget["Category"].get().strip()
+        if not category:
+            raise ValueError("Enter a category.")
+        amount = finance.money(self.budget["Budget"].get().strip())
+        data = copy.deepcopy(self.data)
+        data["budgets"].setdefault(month, {})[category] = str(amount)
+        self.commit(data)
+        self.status.set("Category budget saved.")
+
+    def export_summary(self):
+        path = finance.export_month_csv(self.data, self.month.get().strip())
+        self.status.set(f"Report saved to {path}")
+
+    def refresh(self):
+        self.transactions.delete(*self.transactions.get_children())
+        for item in sorted(self.data["transactions"], key=lambda item: item["date"], reverse=True):
+            self.transactions.insert("", "end", values=(item["date"], item["category"], item["type"], f'{Decimal(item["amount"]):,.2f}'))
+        # A user may be editing the month while saving a transaction.
         try:
-            if choice == "0":
-                break
-            elif choice == "1":
-                item = transaction(input("Date YYYY-MM-DD: "), input("Category: "),
-                                   input("Amount: "), input("Type (income/expense): "))
-                data["transactions"].append(item)
-                save(data)
-            elif choice == "2":
-                # Validate the whole import before adding any rows.
-                with open(input("CSV path: "), newline="", encoding="utf-8-sig") as file:
-                    rows = [transaction(r["date"], r["category"], r["amount"], r["type"])
-                            for r in csv.DictReader(file)]
-                data["transactions"].extend(rows)
-                save(data)
-                print(f"Imported {len(rows)} transactions. Reimporting adds duplicates.")
-            elif choice == "3":
-                month = input("Month YYYY-MM: ")
-                date.fromisoformat(month + "-01")
-                category = input("Category: ").strip()
-                if not category:
-                    raise ValueError("Enter a category.")
-                data["budgets"].setdefault(month, {})[category] = str(money(input("Budget: ")))
-                save(data)
-            elif choice == "4":
-                month = input("Month YYYY-MM: ")
-                income, expense, net, categories = summary(data, month)
-                print(f"{currency}: Income {income:.2f}, Expenses {expense:.2f}, Net {net:.2f}")
-                budgets = data["budgets"].get(month, {})
-                for category in sorted(set(categories) | set(budgets)):
-                    spent = categories.get(category, Decimal("0"))
-                    limit = budgets.get(category)
-                    flag = "OVER BUDGET" if limit is not None and spent > money(limit) else ""
-                    print(category, f"{spent:.2f}", "Budget:", limit, flag)
-                if input("Export summary and chart? y/n: ").lower() == "y":
-                    write_csv(f"summary_{month}.csv", ["month", "currency", "income", "expenses", "net"],
-                              [[month, currency, income, expense, net]])
-                    plt.figure()
-                    plt.bar(["Income", "Expenses", "Net"], list(map(float, [income, expense, net])))
-                    finish_chart(f"summary_{month}.png", f"Monthly summary: {month}", "Type", currency)
-            elif choice == "5":
-                print("Confirm that all transactions are entered for the selected months.")
-                months, totals, fitted, prediction, rmse = expense_trend(
-                    data, input("First complete month YYYY-MM: "), input("Last complete month YYYY-MM: "))
-                print(f"Trend projection for {next_month(months[-1])}: {prediction:.2f} {currency}; RMSE {rmse:.2f}")
-                plt.figure()
-                plt.plot(months, totals, "o-", label="Expenses")
-                plt.plot(months + [next_month(months[-1])], list(fitted) + [prediction], "--", label="Trend projection")
-                plt.legend()
-                finish_chart("expense_trend.png", "Expense trend projection", "Month", currency)
-            elif choice == "6":
-                balance = number("Initial balance: ")
-                target = number("Savings target: ")
-                rate = number("Annual interest percent: ") / 100
-                months = int(input("Months until deadline (60 for five years): "))
-                deposit, iterations, width = required_contribution(balance, target, rate, months)
-                balances = savings(balance, deposit, rate, months)
-                print(f"Monthly deposit: {deposit:.2f} {currency}; final balance: {balances[-1]:.2f}")
-                print(f"Bisection iterations: {iterations}; interval width: {width:.6f}")
-                for month, value in enumerate(balances):
-                    print(f"Month {month}: {value:.2f}")
-                if input("Export schedule and chart? y/n: ").lower() == "y":
-                    write_csv("savings.csv", ["month", f"balance_{currency}"], enumerate(balances))
-                    plt.figure()
-                    plt.plot(range(months + 1), balances)
-                    finish_chart("savings.png", "Savings balance schedule", "Month", currency)
-            elif choice == "7":
-                bands = monte_carlo(number("Initial balance: "), number("Monthly deposit: "),
-                                    number("Expected annual return percent: ") / 100,
-                                    number("Annual volatility percent: ") / 100)
-                print("Final 5th, 50th, 95th percentiles:", np.round(bands[:, -1], 2), currency)
-                plt.figure()
-                plt.fill_between(range(61), bands[0], bands[2], alpha=0.3, label="5th-95th percentiles")
-                plt.plot(range(61), bands[1], label="Median")
-                plt.legend()
-                finish_chart("monte_carlo.png", "Five-year wealth simulation (1,000 runs)", "Month", currency)
-            elif choice == "8":
-                amount = number("Amount to allocate: ")
-                returns, risks, caps = [], [], []
-                for asset in ["Cash", "Bonds", "Stocks"]:
-                    print(asset)
-                    returns.append(number("Expected annual return percent: ") / 100)
-                    risks.append(number("Risk score (0 to 1): "))
-                    caps.append(number("Maximum allocation percent: ") / 100)
-                risk_limit = number("Maximum weighted risk score: ")
-                reserve = number("Minimum cash reserve: ")
-                allocation = optimize_allocation(amount, returns, risks, caps, risk_limit, reserve)
-                for asset, value in zip(["Cash", "Bonds", "Stocks"], allocation):
-                    print(f"{asset}: {value:.2f} {currency}")
-            else:
-                print("Choose a number from the menu.")
-        except (ValueError, ArithmeticError, OSError, KeyError) as error:
-            print("Error:", error)
+            self.refresh_summary()
+        except ValueError:
+            self.totals.set("Enter a valid month and refresh the summary.")
+            self.categories.delete(*self.categories.get_children())
+
+    def refresh_summary(self):
+        month = self.month.get().strip()
+        income, expenses, net, categories = finance.summary(self.data, month)
+        self.totals.set(f'{self.data["currency"]}   Income: {income:,.2f}   Expenses: {expenses:,.2f}   Net: {net:,.2f}')
+        self.categories.delete(*self.categories.get_children())
+        budgets = self.data["budgets"].get(month, {})
+        for category in sorted(set(categories) | set(budgets)):
+            spent = categories.get(category, Decimal("0"))
+            limit = finance.money(budgets[category]) if category in budgets else None
+            self.categories.insert("", "end", values=(category, f"{spent:,.2f}", "—" if limit is None else f"{limit:,.2f}", "Over budget" if limit is not None and spent > limit else ""))
+
+    def chart_area(self, tab):
+        area = ttk.Frame(tab)
+        area.pack(fill="both", expand=True)
+        return area
+
+    def chart(self, area, title, xlabel, ylabel):
+        for child in area.winfo_children():
+            child.destroy()
+        figure = Figure(figsize=(7, 3), dpi=100, layout="constrained")
+        axes = figure.add_subplot()
+        axes.set(title=title, xlabel=xlabel, ylabel=ylabel)
+        canvas = FigureCanvasTkAgg(figure, master=area)
+        canvas.get_tk_widget().pack(fill="both", expand=True)
+        return axes, canvas
+
+    def build_trend(self):
+        tab = self.tab("Expense trend")
+        ttk.Label(tab, text="Enter at least three consecutive completed months. Include all transactions before forecasting.").pack(anchor="w", pady=(0, 12))
+        self.trend = self.fields(tab, [("First month (YYYY-MM)", ""), ("Last month (YYYY-MM)", "")])
+        self.button(tab, "Calculate trend", self.calculate_trend)
+        self.trend_result = tk.StringVar()
+        ttk.Label(tab, textvariable=self.trend_result).pack(anchor="w")
+        self.trend_chart = self.chart_area(tab)
+
+    def calculate_trend(self):
+        months, totals, fitted, prediction, rmse = finance.expense_trend(self.data, *(v.get().strip() for v in self.trend.values()))
+        forecast = finance.next_month(months[-1])
+        self.trend_result.set(f"Projected expenses for {forecast}: {prediction:,.2f} {self.data['currency']} | RMSE: {rmse:,.2f}")
+        axes, canvas = self.chart(self.trend_chart, "Monthly expense trend", "Month", self.data["currency"])
+        axes.plot(months, totals, "o-", label="Actual")
+        axes.plot(months + [forecast], list(fitted) + [prediction], "--", label="Trend / forecast")
+        axes.tick_params(axis="x", rotation=25)
+        axes.legend()
+        canvas.draw()
+
+    def build_savings(self):
+        tab = self.tab("Savings target")
+        self.saving = self.fields(tab, [("Initial balance", "0"), ("Target balance", "10000"), ("Annual interest (%)", "5"), ("Months", "60")])
+        self.button(tab, "Calculate monthly contribution", self.calculate_savings)
+        self.savings_result = tk.StringVar()
+        ttk.Label(tab, textvariable=self.savings_result).pack(anchor="w")
+        self.savings_chart = self.chart_area(tab)
+
+    def calculate_savings(self):
+        balance = finance.money(self.saving["Initial balance"].get())
+        target = finance.money(self.saving["Target balance"].get())
+        rate = finance.decimal_value(self.saving["Annual interest (%)"].get()) / 100
+        months = int(self.saving["Months"].get())
+        if months < 1 or months > 1200 or rate <= -1:
+            raise ValueError("Use 1–1200 months and an annual interest rate greater than -100%.")
+        deposit, _, _ = finance.required_contribution(balance, target, rate, months)
+        schedule = finance.savings(balance, finance.money(deposit), rate, months)
+        self.savings_result.set(f"Monthly contribution: {deposit:,.2f} {self.data['currency']} | Final balance: {schedule[-1]:,.2f}")
+        axes, canvas = self.chart(self.savings_chart, "Savings schedule", "Month", self.data["currency"])
+        axes.plot(range(months + 1), [float(v) for v in schedule])
+        canvas.draw()
+
+    def build_simulation(self):
+        tab = self.tab("Monte Carlo")
+        ttk.Label(tab, text="Five-year simulation • 1,000 paths • normally distributed monthly returns").pack(anchor="w", pady=(0, 12))
+        self.sim = self.fields(tab, [("Initial balance", "1000"), ("Monthly deposit", "100"), ("Expected annual return (%)", "7"), ("Annual volatility (%)", "15")])
+        self.button(tab, "Run simulation", self.calculate_simulation)
+        self.sim_result = tk.StringVar()
+        ttk.Label(tab, textvariable=self.sim_result).pack(anchor="w")
+        self.sim_chart = self.chart_area(tab)
+
+    def calculate_simulation(self):
+        balance, deposit, annual_return, volatility = [float(finance.decimal_value(v.get())) for v in self.sim.values()]
+        bands = finance.monte_carlo(balance, deposit, annual_return / 100, volatility / 100)
+        self.sim_result.set(f"Final balances ({self.data['currency']}): 5th {bands[0,-1]:,.2f} | Median {bands[1,-1]:,.2f} | 95th {bands[2,-1]:,.2f}")
+        axes, canvas = self.chart(self.sim_chart, "Simulated wealth", "Month", self.data["currency"])
+        axes.fill_between(range(61), bands[0], bands[2], alpha=0.25, label="5th–95th percentiles")
+        axes.plot(range(61), bands[1], label="Median")
+        axes.legend()
+        canvas.draw()
+
+    def build_allocation(self):
+        tab = self.tab("Allocation")
+        self.alloc = self.fields(tab, [("Investment amount", "10000"), ("Maximum weighted risk", "0.5"), ("Minimum cash reserve", "1000")])
+        grid = ttk.Frame(tab)
+        grid.pack(anchor="w", pady=(0, 14))
+        for col, label in enumerate(("Asset", "Return (%)", "Risk score", "Maximum (%)")):
+            ttk.Label(grid, text=label).grid(row=0, column=col, padx=8, pady=6)
+        self.assets = []
+        for row, (asset, defaults) in enumerate((("Cash", (2, 0, 100)), ("Bonds", (4, 0.3, 100)), ("Stocks", (8, 0.8, 60))), 1):
+            ttk.Label(grid, text=asset).grid(row=row, column=0, sticky="w", padx=8)
+            values = []
+            for col, value in enumerate(defaults, 1):
+                variable = tk.StringVar(value=str(value))
+                ttk.Entry(grid, textvariable=variable, width=16).grid(row=row, column=col, padx=8, pady=4)
+                values.append(variable)
+            self.assets.append(values)
+        self.button(tab, "Optimize allocation", self.calculate_allocation)
+        self.allocation_result = tk.StringVar()
+        ttk.Label(tab, textvariable=self.allocation_result, font=("Segoe UI", 13), justify="left").pack(anchor="w", pady=12)
+
+    def calculate_allocation(self):
+        amount, risk, reserve = [float(finance.decimal_value(v.get())) for v in self.alloc.values()]
+        rows = [[float(finance.decimal_value(v.get())) for v in row] for row in self.assets]
+        result = finance.optimize_allocation(amount, [r[0] / 100 for r in rows], [r[1] for r in rows], [r[2] / 100 for r in rows], risk, reserve)
+        self.allocation_result.set("\n".join(f"{asset}: {value:,.2f} {self.data['currency']} ({value / amount:.1%})" for asset, value in zip(("Cash", "Bonds", "Stocks"), result)))
 
 
-# Start only when this file is run directly.
+def main():
+    root = tk.Tk()
+    style = ttk.Style(root)
+    style.theme_use("clam")
+    style.configure("TLabel", font=("Segoe UI", 10))
+    style.configure("TButton", padding=6)
+    try:
+        FinanceApp(root)
+    except (ValueError, ArithmeticError, OSError, KeyError, TypeError) as error:
+        root.withdraw()
+        messagebox.showerror("Unable to open tracker", f"Could not load finance_data.json:\n{error}\n\nYour saved file has not been changed.", parent=root)
+        root.destroy()
+        return
+    root.mainloop()
+
+
 if __name__ == "__main__":
     main()
