@@ -12,6 +12,132 @@
       "category": "Salary",
       "amount": "4500",
       "type": "expense"
+    },
+    {
+      "date": "2026-03-01",
+      "category": "Salary",
+      "amount": "1000",
+      "type": "income"
+    },
+    {
+      "date": "2026-01-15",
+      "category": "Food",
+      "amount": "100",
+      "type": "expense"
+    },
+    {
+      "date": "2026-02-01",
+      "category": "Salary",
+      "amount": "1000",
+      "type": "income"
+    },
+    {
+      "date": "2026-02-15",
+      "category": "Food",
+      "amount": "200",
+      "type": "expense"
+    },
+    {
+      "date": "2026-03-01",
+      "category": "Salary",
+      "amount": "1000",
+      "type": "income"
+    },
+    {
+      "date": "2026-03-15",
+      "category": "Food",
+      "amount": "300",
+      "type": "expense"
+    },
+    {
+      "date": "2026-03-20",
+      "category": "Housing",
+      "amount": "400",
+      "type": "expense"
+    },
+    {
+      "date": "2026-03-01",
+      "category": "Salary",
+      "amount": "1000",
+      "type": "income"
+    },
+    {
+      "date": "2026-01-15",
+      "category": "Food",
+      "amount": "100",
+      "type": "expense"
+    },
+    {
+      "date": "2026-02-01",
+      "category": "Salary",
+      "amount": "1000",
+      "type": "income"
+    },
+    {
+      "date": "2026-02-15",
+      "category": "Food",
+      "amount": "200",
+      "type": "expense"
+    },
+    {
+      "date": "2026-03-01",
+      "category": "Salary",
+      "amount": "1000",
+      "type": "income"
+    },
+    {
+      "date": "2026-03-15",
+      "category": "Food",
+      "amount": "300",
+      "type": "expense"
+    },
+    {
+      "date": "2026-03-20",
+      "category": "Housing",
+      "amount": "400",
+      "type": "expense"
+    },
+    {
+      "date": "2026-03-01",
+      "category": "Salary",
+      "amount": "1000",
+      "type": "income"
+    },
+    {
+      "date": "2026-01-15",
+      "category": "Food",
+      "amount": "100",
+      "type": "expense"
+    },
+    {
+      "date": "2026-02-01",
+      "category": "Salary",
+      "amount": "1000",
+      "type": "income"
+    },
+    {
+      "date": "2026-02-15",
+      "category": "Food",
+      "amount": "200",
+      "type": "expense"
+    },
+    {
+      "date": "2026-03-01",
+      "category": "Salary",
+      "amount": "1000",
+      "type": "income"
+    },
+    {
+      "date": "2026-03-15",
+      "category": "Food",
+      "amount": "300",
+      "type": "expense"
+    },
+    {
+      "date": "2026-03-20",
+      "category": "Housing",
+      "amount": "400",
+      "type": "expense"
     }
   ],
   "budgets": {}
