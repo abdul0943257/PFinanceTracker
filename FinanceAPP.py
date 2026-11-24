@@ -1,5 +1,6 @@
 """Desktop interface for the personal finance tracker. Run: python FinanceAPP.py."""
 import copy
+import calendar
 import json
 import tkinter as tk
 from datetime import date
@@ -10,6 +11,73 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 
 import PFinanceTracker as finance
+
+
+class DatePicker(ttk.Frame):
+    """Read-only date display with a calendar built from standard Tk widgets."""
+
+    def __init__(self, parent, variable):
+        super().__init__(parent)
+        self.variable = variable
+        self.popup = None
+        ttk.Entry(self, textvariable=variable, state="readonly", width=17).pack(side="left")
+        ttk.Button(self, text="Pick date…", command=self.open_calendar).pack(side="left", padx=(6, 0))
+
+    def open_calendar(self):
+        if self.popup is not None and self.popup.winfo_exists():
+            self.popup.lift()
+            return
+        selected = date.fromisoformat(self.variable.get())
+        self.year, self.month = selected.year, selected.month
+        self.popup = tk.Toplevel(self)
+        self.popup.title("Choose transaction date")
+        self.popup.transient(self.winfo_toplevel())
+        self.popup.resizable(False, False)
+        self.popup.bind("<Escape>", lambda event: self.popup.destroy())
+        controls = ttk.Frame(self.popup, padding=8)
+        controls.pack(fill="x")
+        self.previous = ttk.Button(controls, text="◀", width=4, command=lambda: self.move_month(-1))
+        self.previous.pack(side="left")
+        self.heading = ttk.Label(controls, width=22, anchor="center")
+        self.heading.pack(side="left")
+        self.following = ttk.Button(controls, text="▶", width=4, command=lambda: self.move_month(1))
+        self.following.pack(side="left")
+        self.days = ttk.Frame(self.popup, padding=8)
+        self.days.pack()
+        ttk.Button(self.popup, text="Today", command=lambda: self.select_date(date.today())).pack(pady=(0, 8))
+        self.draw_month()
+        self.popup.grab_set()
+        self.popup.focus_set()
+
+    def move_month(self, offset):
+        index = (self.year - 1) * 12 + self.month - 1 + offset
+        if 0 <= index < 9999 * 12:
+            year, month = divmod(index, 12)
+            self.year, self.month = year + 1, month + 1
+            self.draw_month()
+
+    def draw_month(self):
+        for child in self.days.winfo_children():
+            child.destroy()
+        self.heading.configure(text=f"{calendar.month_name[self.month]} {self.year}")
+        self.previous.configure(state="disabled" if (self.year, self.month) == (1, 1) else "normal")
+        self.following.configure(state="disabled" if (self.year, self.month) == (9999, 12) else "normal")
+        for column, name in enumerate(("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")):
+            ttk.Label(self.days, text=name, anchor="center").grid(row=0, column=column)
+        selected = date.fromisoformat(self.variable.get())
+        for row, week in enumerate(calendar.Calendar().monthdayscalendar(self.year, self.month), 1):
+            for column, day in enumerate(week):
+                if day:
+                    chosen = date(self.year, self.month, day)
+                    button = ttk.Button(self.days, text=str(day), width=4,
+                                        command=lambda value=chosen: self.select_date(value))
+                    button.grid(row=row, column=column, padx=1, pady=1)
+                    if chosen == selected:
+                        button.state(["pressed"])
+
+    def select_date(self, chosen):
+        self.variable.set(chosen.isoformat())
+        self.popup.destroy()
 
 
 class FinanceApp(ttk.Frame):
@@ -77,7 +145,9 @@ class FinanceApp(ttk.Frame):
         for row, (label, default) in enumerate(specs):
             ttk.Label(form, text=label).grid(row=row, column=0, sticky="w", padx=(0, 14), pady=4)
             value = tk.StringVar(value=default)
-            if label == "Category":
+            if label == "Date (YYYY-MM-DD)":
+                field = DatePicker(form, value)
+            elif label == "Category":
                 field = ttk.Combobox(form, textvariable=value, width=26,
                                      values=self.category_choices())
                 self.category_dropdowns.append(field)
