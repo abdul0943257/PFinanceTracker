@@ -347,9 +347,26 @@ class FinanceApp(ttk.Frame):
         figure = Figure(figsize=(7, 3), dpi=100, layout="constrained")
         axes = figure.add_subplot()
         axes.set(title=title, xlabel=xlabel, ylabel=ylabel)
+        ttk.Button(
+            area,
+            text="Save chart as PNG…",
+            command=self.guard(lambda: self.save_chart(figure, title)),
+        ).pack(anchor="w", pady=(0, 8))
         canvas = FigureCanvasTkAgg(figure, master=area)
         canvas.get_tk_widget().pack(fill="both", expand=True)
         return axes, canvas
+
+    def save_chart(self, figure, title):
+        path = filedialog.asksaveasfilename(
+            parent=self.root,
+            title="Download chart as PNG",
+            initialfile=f"{title}.png",
+            defaultextension=".png",
+            filetypes=[("PNG image", "*.png")],
+        )
+        if path:
+            figure.savefig(path, format="png")
+            self.status.set(f"Chart saved to {path}")
 
     def build_trend(self):
         tab = self.tab("Expense trend")
