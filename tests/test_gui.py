@@ -25,6 +25,38 @@ class DesktopTests(unittest.TestCase):
         self.data_patch.stop()
         self.directory.cleanup()
 
+    def test_load_saved_dates_and_open_calendars(self):
+        self.path.write_text(json.dumps(dict(
+            currency="USD",
+            transactions=[dict(date="2026-7-5", category="Food", amount="20", type="expense")],
+            budgets={"2026-7": {"Food": "40"}},
+        )), encoding="utf-8")
+        loaded = self.app.load_data()
+        self.assertEqual(loaded["transactions"][0]["date"], "2026-07-05")
+        self.assertEqual(loaded["budgets"], {"2026-07": {"Food": "40"}})
+        for value, month_only in (("2026-07-05", False), ("2026-07", True)):
+            picker = gui.DatePicker(self.root, tk.StringVar(master=self.root, value=value), month_only)
+            picker.open_calendar()
+            self.assertEqual((picker.year, picker.month), (2026, 7))
+            picker.popup.destroy()
+            picker.destroy()
+        for month_only in (False, True):
+            variable = tk.StringVar(master=self.root, value="invalid")
+            picker = gui.DatePicker(self.root, variable, month_only)
+            picker.open_calendar()
+            today = gui.date.today()
+            self.assertEqual((picker.year, picker.month), (today.year, today.month))
+            self.assertEqual(variable.get(), "invalid")
+            picker.move_month(-1)
+            picker.select_date(gui.date(2026, 7, 5))
+            self.assertEqual(variable.get(), "2026-07" if month_only else "2026-07-05")
+            picker.destroy()
+        for invalid in ("2026-02-30", "invalid"):
+            with self.assertRaises(ValueError):
+                gui.finance.normalize_date(invalid)
+        with self.assertRaises(ValueError):
+            gui.finance.normalize_month("2026-13")
+
     def test_transaction_budget_and_reload(self):
         self.app.entry["Date (YYYY-MM-DD)"].set("2026-07-15")
         self.app.entry["Category"].set("Food")

@@ -14,31 +14,29 @@ import PFinanceTracker as finance
 
 
 class DatePicker(ttk.Frame):
-    """Editable date field with a calendar built from standard Tk widgets."""
+    """Read-only date display with a calendar built from standard Tk widgets."""
 
     def __init__(self, parent, variable, month_only=False):
         super().__init__(parent)
         self.variable = variable
         self.month_only = month_only
         self.popup = None
-        ttk.Entry(self, textvariable=variable, width=17).pack(side="left")
+        ttk.Entry(self, textvariable=variable, state="readonly", width=17).pack(side="left")
         ttk.Button(self, text="Pick month…" if month_only else "Pick date…", command=self.open_calendar).pack(side="left", padx=(6, 0))
 
     def selected_date(self):
-        # Use the typed date to choose the calendar month.
-        value = self.variable.get()
+        # Open today when the typed date is incomplete.
         try:
-            normalized = finance.normalize_month(value) + "-01" if self.month_only else finance.normalize_date(value)
-            return date.fromisoformat(normalized)
+            value = self.variable.get()
+            return date.fromisoformat(finance.normalize_month(value) + "-01" if self.month_only else finance.normalize_date(value))
         except ValueError:
-            # Keep the calendar usable while the input is incomplete.
             return date.today()
 
     def open_calendar(self):
-        # Reuse an open calendar instead of creating another.
         if self.popup is not None and self.popup.winfo_exists():
             self.popup.lift()
             return
+        value = self.variable.get()
         selected = self.selected_date()
         self.year, self.month = selected.year, selected.month
         self.popup = tk.Toplevel(self)
@@ -61,12 +59,10 @@ class DatePicker(ttk.Frame):
                        command=lambda: self.select_date(date(self.year, self.month, 1))).pack(pady=(0, 8))
         ttk.Button(self.popup, text="Today", command=lambda: self.select_date(date.today())).pack(pady=(0, 8))
         self.draw_month()
-        # Keep keyboard and mouse input in the calendar.
         self.popup.grab_set()
         self.popup.focus_set()
 
     def move_month(self, offset):
-        # Convert to a month index to handle year changes.
         index = (self.year - 1) * 12 + self.month - 1 + offset
         if 0 <= index < 9999 * 12:
             year, month = divmod(index, 12)
@@ -74,7 +70,6 @@ class DatePicker(ttk.Frame):
             self.draw_month()
 
     def draw_month(self):
-        # Replace the old grid when the month changes.
         for child in self.days.winfo_children():
             child.destroy()
         self.heading.configure(text=f"{calendar.month_name[self.month]} {self.year}")
@@ -82,6 +77,7 @@ class DatePicker(ttk.Frame):
         self.following.configure(state="disabled" if (self.year, self.month) == (9999, 12) else "normal")
         for column, name in enumerate(("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")):
             ttk.Label(self.days, text=name, anchor="center").grid(row=0, column=column)
+        value = self.variable.get()
         selected = self.selected_date()
         for row, week in enumerate(calendar.Calendar().monthdayscalendar(self.year, self.month), 1):
             for column, day in enumerate(week):
@@ -94,7 +90,6 @@ class DatePicker(ttk.Frame):
                         button.state(["pressed"])
 
     def select_date(self, chosen):
-        # Copy the selection back to the form.
         self.variable.set(chosen.strftime("%Y-%m") if self.month_only else chosen.isoformat())
         self.popup.destroy()
 
@@ -129,7 +124,6 @@ class FinanceApp(ttk.Frame):
         self.refresh()
 
     def load_data(self):
-        # Start with empty data when no saved file exists.
         if not finance.DATA_FILE.exists():
             return dict(currency="USD", transactions=[], budgets={})
         data = json.loads(finance.DATA_FILE.read_text(encoding="utf-8"))
@@ -137,8 +131,8 @@ class FinanceApp(ttk.Frame):
             raise ValueError("Saved data must contain a currency label.")
         if not isinstance(data.get("transactions"), list) or not isinstance(data.get("budgets"), dict):
             raise ValueError("Saved transactions or budgets have an invalid format.")
-        # Validate saved values before displaying them.
         for item in data["transactions"]:
+            # Store all accepted dates in one format.
             item["date"] = finance.normalize_date(item["date"])
             finance.transaction(item["date"], item["category"], item["amount"], item["type"])
         normalized_budgets = {}
@@ -151,7 +145,6 @@ class FinanceApp(ttk.Frame):
         return data
 
     def guard(self, action):
-        # Show input and file errors in a dialog.
         def run():
             try:
                 action()
@@ -165,7 +158,6 @@ class FinanceApp(ttk.Frame):
         return frame
 
     def fields(self, parent, specs):
-        # Choose a form widget from each field label.
         form = ttk.Frame(parent)
         form.pack(fill="x", pady=(0, 12))
         values = {}
@@ -174,7 +166,7 @@ class FinanceApp(ttk.Frame):
             value = tk.StringVar(value=default)
             if label == "Date (YYYY-MM-DD)":
                 field = DatePicker(form, value)
-            elif label in ("Month (YYYY-MM)", "First month (YYYY-MM)", "Last month (YYYY-MM)"):
+            elif label in ("First month (YYYY-MM)", "Last month (YYYY-MM)"):
                 field = DatePicker(form, value, month_only=True)
             elif label == "Category":
                 field = ttk.Combobox(form, textvariable=value, width=26,
@@ -187,7 +179,6 @@ class FinanceApp(ttk.Frame):
         return values
 
     def category_choices(self):
-        # Include custom categories in the suggestions.
         categories = {"Food", "Housing", "Transport", "Utilities", "Healthcare",
                       "Education", "Entertainment", "Shopping", "Savings",
                       "Salary", "Freelance", "Investments", "Gifts", "Other"}
@@ -213,7 +204,6 @@ class FinanceApp(ttk.Frame):
         return table
 
     def commit(self, data):
-        # Update the display only after saving succeeds.
         finance.save(data)
         self.data = data
         self.refresh()
@@ -267,7 +257,6 @@ class FinanceApp(ttk.Frame):
         if self.editing_index is None:
             raise ValueError("Select a transaction and click Edit selected first.")
         item = finance.transaction(self.entry["Date (YYYY-MM-DD)"].get().strip(), self.entry["Category"].get(), self.entry["Amount"].get().strip(), self.kind.get())
-        # Preserve current data if saving fails.
         data = copy.deepcopy(self.data)
         data["transactions"][self.editing_index] = item
         self.commit(data)
@@ -298,7 +287,6 @@ class FinanceApp(ttk.Frame):
     def import_csv(self):
         path = filedialog.askopenfilename(parent=self.root, filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
         if path:
-            # Import into a copy so invalid rows leave current data intact.
             data = copy.deepcopy(self.data)
             count = finance.import_csv(path, data)
             self.commit(data)
@@ -336,7 +324,6 @@ class FinanceApp(ttk.Frame):
         for dropdown in self.category_dropdowns:
             dropdown.configure(values=choices)
         self.transactions.delete(*self.transactions.get_children())
-        # Keep original indices as row IDs when sorting by date.
         for index, item in sorted(enumerate(self.data["transactions"]), key=lambda pair: pair[1]["date"], reverse=True):
             self.transactions.insert("", "end", iid=str(index), values=(item["date"], item["category"], item["type"], f'{Decimal(item["amount"]):,.2f}'))
         # A user may be editing the month while saving a transaction.
@@ -353,7 +340,6 @@ class FinanceApp(ttk.Frame):
         self.totals.set(f'{self.data["currency"]}   Income: {income:,.2f}   Expenses: {expenses:,.2f}   Net: {net:,.2f}')
         self.categories.delete(*self.categories.get_children())
         budgets = self.data["budgets"].get(month, {})
-        # Include categories with spending, a budget, or both.
         for category in sorted(set(categories) | set(budgets)):
             spent = categories.get(category, Decimal("0"))
             limit = finance.money(budgets[category]) if category in budgets else None
@@ -365,32 +351,14 @@ class FinanceApp(ttk.Frame):
         return area
 
     def chart(self, area, title, xlabel, ylabel):
-        # Replace the previous chart and its save button.
         for child in area.winfo_children():
             child.destroy()
         figure = Figure(figsize=(7, 3), dpi=100, layout="constrained")
         axes = figure.add_subplot()
         axes.set(title=title, xlabel=xlabel, ylabel=ylabel)
-        ttk.Button(
-            area,
-            text="Save chart as PNG…",
-            command=self.guard(lambda: self.save_chart(figure, title)),
-        ).pack(anchor="w", pady=(0, 8))
         canvas = FigureCanvasTkAgg(figure, master=area)
         canvas.get_tk_widget().pack(fill="both", expand=True)
         return axes, canvas
-    # Save the chart to the selected PNG file.
-    def save_chart(self, figure, title):
-        path = filedialog.asksaveasfilename(
-            parent=self.root,
-            title="Download chart as PNG",
-            initialfile=f"{title}.png",
-            defaultextension=".png",
-            filetypes=[("PNG image", "*.png")],
-        )
-        if path:
-            figure.savefig(path, format="png")
-            self.status.set(f"Chart saved to {path}")
 
     def build_trend(self):
         tab = self.tab("Expense trend")
@@ -402,7 +370,6 @@ class FinanceApp(ttk.Frame):
         self.trend_chart = self.chart_area(tab)
 
     def calculate_trend(self):
-        # Plot past expenses alongside the next-month forecast.
         months, totals, fitted, prediction, rmse = finance.expense_trend(self.data, *(v.get().strip() for v in self.trend.values()))
         forecast = finance.next_month(months[-1])
         self.trend_result.set(f"Projected expenses for {forecast}: {prediction:,.2f} {self.data['currency']} | RMSE: {rmse:,.2f}")
@@ -424,7 +391,6 @@ class FinanceApp(ttk.Frame):
     def calculate_savings(self):
         balance = finance.money(self.saving["Initial balance"].get())
         target = finance.money(self.saving["Target balance"].get())
-        # Convert the percentage to a decimal rate.
         rate = finance.decimal_value(self.saving["Annual interest (%)"].get()) / 100
         months = int(self.saving["Months"].get())
         if months < 1 or months > 1200 or rate <= -1:
@@ -446,7 +412,6 @@ class FinanceApp(ttk.Frame):
         self.sim_chart = self.chart_area(tab)
 
     def calculate_simulation(self):
-        # Show the median path and the range of likely balances.
         balance, deposit, annual_return, volatility = [float(finance.decimal_value(v.get())) for v in self.sim.values()]
         bands = finance.monte_carlo(balance, deposit, annual_return / 100, volatility / 100)
         self.sim_result.set(f"Final balances ({self.data['currency']}): 5th {bands[0,-1]:,.2f} | Median {bands[1,-1]:,.2f} | 95th {bands[2,-1]:,.2f}")
@@ -477,7 +442,6 @@ class FinanceApp(ttk.Frame):
         ttk.Label(tab, textvariable=self.allocation_result, font=("Segoe UI", 13), justify="left").pack(anchor="w", pady=12)
 
     def calculate_allocation(self):
-        # Convert form values before running the allocation model.
         amount, risk, reserve = [float(finance.decimal_value(v.get())) for v in self.alloc.values()]
         rows = [[float(finance.decimal_value(v.get())) for v in row] for row in self.assets]
         result = finance.optimize_allocation(amount, [r[0] / 100 for r in rows], [r[1] for r in rows], [r[2] / 100 for r in rows], risk, reserve)

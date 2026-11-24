@@ -14,7 +14,8 @@ This project was my best choice since it addresses everyday need in this modern 
 import csv
 import json
 import math
-from datetime import date
+import re
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation, ROUND_CEILING
 from pathlib import Path
 
@@ -50,21 +51,55 @@ def money(value):
     return value
 
 def normalize_date(value):
-    """Validate a YYYY-MM-DD date and return its canonical ISO form."""
-    try:
-        year, month, day = map(int, value.strip().split("-"))
-        return date(year, month, day).isoformat()
-    except (AttributeError, TypeError, ValueError) as error:
-        raise ValueError("Enter a valid date in YYYY-MM-DD format.") from error
+    """Read common date formats and store YYYY-MM-DD."""
+    text = value.strip() if isinstance(value, str) else ""
+    numeric = re.fullmatch(r"(\d{1,4})[-/.](\d{1,2})[-/.](\d{1,4})", text)
+    if numeric:
+        first, middle, last = numeric.groups()
+        # Prefer day/month/year when both date orders are possible.
+        candidates = []
+        if len(first) == 4:
+            candidates.append((int(first), int(middle), int(last)))
+        elif len(last) == 4:
+            candidates.extend(((int(last), int(middle), int(first)),
+                               (int(last), int(first), int(middle))))
+        for year, month, day in candidates:
+            try:
+                return date(year, month, day).isoformat()
+            except ValueError:
+                pass
+    # Also accept compact dates and written month names.
+    for pattern in ("%Y%m%d", "%d %b %Y", "%d %B %Y", "%b %d %Y", "%B %d %Y",
+                    "%Y %b %d", "%Y %B %d"):
+        try:
+            return datetime.strptime(" ".join(text.replace(",", " ").split()), pattern).date().isoformat()
+        except ValueError:
+            pass
+    raise ValueError("Enter a valid date, such as 2026-11-24, 24/11/2026, or 24 Nov 2026. Use a four-digit year.")
 
 
 def normalize_month(value):
-    """Validate a YYYY-MM month and return its canonical ISO form."""
+    """Read common month formats and store YYYY-MM."""
+    text = value.strip() if isinstance(value, str) else ""
+    parts = re.split(r"[-/.]", text)
     try:
-        year, month = map(int, value.strip().split("-"))
+        if len(parts) != 2:
+            raise ValueError
+        if len(parts[0]) == 4:
+            year, month = map(int, parts)
+        elif len(parts[1]) == 4:
+            month, year = map(int, parts)
+        else:
+            raise ValueError
         return date(year, month, 1).isoformat()[:7]
-    except (AttributeError, TypeError, ValueError) as error:
-        raise ValueError("Enter a valid month in YYYY-MM format.") from error
+    except ValueError:
+        pass
+    for pattern in ("%b %Y", "%B %Y", "%Y %b", "%Y %B", "%Y%m"):
+        try:
+            return datetime.strptime(text, pattern).date().isoformat()[:7]
+        except ValueError:
+            pass
+    raise ValueError("Enter a valid month, such as 2026-11, 11/2026, or Nov 2026.")
 
 
 # Check each transaction before saving.
@@ -94,7 +129,7 @@ def save(data):
 
 # Calculate monthly income, expenses, and net balance.
 def summary(data, month):
-    date.fromisoformat(month + "-01")
+    month = normalize_month(month)
 
     income = Decimal("0")
     expenses = Decimal("0")
@@ -129,8 +164,8 @@ def next_month(month):
 def expense_trend(data, start, end):
     today_month = date.today().strftime("%Y-%m")
 
-    date.fromisoformat(start + "-01")
-    date.fromisoformat(end + "-01")
+    start = normalize_month(start)
+    end = normalize_month(end)
 
     if start > end or end >= today_month:
         raise ValueError("Use completed months in date order.")
