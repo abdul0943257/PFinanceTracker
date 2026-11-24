@@ -49,11 +49,27 @@ def money(value):
 
     return value
 
-from datetime import date
+def normalize_date(value):
+    """Validate a YYYY-MM-DD date and return its canonical ISO form."""
+    try:
+        year, month, day = map(int, value.strip().split("-"))
+        return date(year, month, day).isoformat()
+    except (AttributeError, TypeError, ValueError) as error:
+        raise ValueError("Enter a valid date in YYYY-MM-DD format.") from error
+
+
+def normalize_month(value):
+    """Validate a YYYY-MM month and return its canonical ISO form."""
+    try:
+        year, month = map(int, value.strip().split("-"))
+        return date(year, month, 1).isoformat()[:7]
+    except (AttributeError, TypeError, ValueError) as error:
+        raise ValueError("Enter a valid month in YYYY-MM format.") from error
+
 
 # Check each transaction before saving.
 def transaction(day, category, amount, kind):
-    date.fromisoformat(day)
+    day = normalize_date(day)
 
     if not category.strip() or kind not in ("income", "expense"):
         raise ValueError("Enter a category and use income or expense as the type.")
