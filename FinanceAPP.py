@@ -198,15 +198,64 @@ class FinanceApp(ttk.Frame):
 
     def build_transactions(self):
         tab = self.tab("Transactions")
+        self.editing_index = None
         self.entry = self.fields(tab, [("Date (YYYY-MM-DD)", date.today().isoformat()), ("Category", ""), ("Amount", "")])
         self.kind = tk.StringVar(value="expense")
         ttk.Combobox(tab, textvariable=self.kind, values=("expense", "income"), state="readonly", width=25).pack(anchor="w", pady=(0, 10))
-        self.button(tab, "Add transaction", self.add_transaction)
+        actions = ttk.Frame(tab)
+        actions.pack(anchor="w", pady=(0, 12))
+        self.add_button = ttk.Button(actions, text="Add transaction", command=self.guard(self.add_transaction))
+        self.add_button.pack(side="left", padx=(0, 8))
+        ttk.Button(actions, text="Edit selected", command=self.guard(self.edit_transaction)).pack(side="left", padx=(0, 8))
+        self.update_button = ttk.Button(actions, text="Save changes", state="disabled", command=self.guard(self.update_transaction))
+        self.update_button.pack(side="left", padx=(0, 8))
+        self.cancel_button = ttk.Button(actions, text="Cancel edit", state="disabled", command=self.cancel_edit)
+        self.cancel_button.pack(side="left")
         self.button(tab, "Import CSV…", self.import_csv)
         ttk.Label(tab, text="CSV columns: date, category, amount, type. Importing the same file again adds duplicates.").pack(anchor="w", pady=(0, 8))
         self.transactions = self.table(tab, ("Date", "Category", "Type", "Amount"))
+        self.transactions.configure(selectmode="browse")
+        self.transactions.bind("<Double-1>", lambda event: self.guard(self.edit_transaction)())
+
+    def edit_transaction(self):
+        selected = self.transactions.selection()
+        if not selected:
+            raise ValueError("Select a transaction in the table to edit.")
+        self.editing_index = int(selected[0])
+        item = self.data["transactions"][self.editing_index]
+        self.entry["Date (YYYY-MM-DD)"].set(item["date"])
+        self.entry["Category"].set(item["category"])
+        self.entry["Amount"].set(item["amount"])
+        self.kind.set(item["type"])
+        self.add_button.configure(state="disabled")
+        self.update_button.configure(state="normal")
+        self.cancel_button.configure(state="normal")
+        self.status.set("Editing selected transaction. Update the form, then click Save changes.")
+
+    def update_transaction(self):
+        if self.editing_index is None:
+            raise ValueError("Select a transaction and click Edit selected first.")
+        item = finance.transaction(self.entry["Date (YYYY-MM-DD)"].get().strip(), self.entry["Category"].get(), self.entry["Amount"].get().strip(), self.kind.get())
+        data = copy.deepcopy(self.data)
+        data["transactions"][self.editing_index] = item
+        self.commit(data)
+        self.cancel_edit()
+        self.status.set("Transaction updated and saved.")
+
+    def cancel_edit(self):
+        self.editing_index = None
+        self.add_button.configure(state="normal")
+        self.update_button.configure(state="disabled")
+        self.cancel_button.configure(state="disabled")
+        self.entry["Date (YYYY-MM-DD)"].set(date.today().isoformat())
+        self.entry["Category"].set("")
+        self.entry["Amount"].set("")
+        self.kind.set("expense")
+        self.status.set("Ready to add a new transaction.")
 
     def add_transaction(self):
+        if self.editing_index is not None:
+            raise ValueError("Save or cancel the current edit before adding a transaction.")
         item = finance.transaction(self.entry["Date (YYYY-MM-DD)"].get().strip(), self.entry["Category"].get(), self.entry["Amount"].get().strip(), self.kind.get())
         data = copy.deepcopy(self.data)
         data["transactions"].append(item)
@@ -254,8 +303,8 @@ class FinanceApp(ttk.Frame):
         for dropdown in self.category_dropdowns:
             dropdown.configure(values=choices)
         self.transactions.delete(*self.transactions.get_children())
-        for item in sorted(self.data["transactions"], key=lambda item: item["date"], reverse=True):
-            self.transactions.insert("", "end", values=(item["date"], item["category"], item["type"], f'{Decimal(item["amount"]):,.2f}'))
+        for index, item in sorted(enumerate(self.data["transactions"]), key=lambda pair: pair[1]["date"], reverse=True):
+            self.transactions.insert("", "end", iid=str(index), values=(item["date"], item["category"], item["type"], f'{Decimal(item["amount"]):,.2f}'))
         # A user may be editing the month while saving a transaction.
         try:
             self.refresh_summary()
