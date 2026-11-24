@@ -29,7 +29,7 @@ class DatePicker(ttk.Frame):
             self.popup.lift()
             return
         value = self.variable.get()
-        selected = date.fromisoformat(value + "-01" if self.month_only else value) if value else date.today()
+        selected = date.fromisoformat(finance.normalize_month(value) + "-01" if self.month_only else finance.normalize_date(value)) if value else date.today()
         self.year, self.month = selected.year, selected.month
         self.popup = tk.Toplevel(self)
         self.popup.title("Choose month" if self.month_only else "Choose transaction date")
@@ -70,7 +70,7 @@ class DatePicker(ttk.Frame):
         for column, name in enumerate(("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")):
             ttk.Label(self.days, text=name, anchor="center").grid(row=0, column=column)
         value = self.variable.get()
-        selected = date.fromisoformat(value + "-01" if self.month_only else value) if value else date.today()
+        selected = date.fromisoformat(finance.normalize_month(value) + "-01" if self.month_only else finance.normalize_date(value)) if value else date.today()
         for row, week in enumerate(calendar.Calendar().monthdayscalendar(self.year, self.month), 1):
             for column, day in enumerate(week):
                 if day:
@@ -124,11 +124,15 @@ class FinanceApp(ttk.Frame):
         if not isinstance(data.get("transactions"), list) or not isinstance(data.get("budgets"), dict):
             raise ValueError("Saved transactions or budgets have an invalid format.")
         for item in data["transactions"]:
+            item["date"] = finance.normalize_date(item["date"])
             finance.transaction(item["date"], item["category"], item["amount"], item["type"])
+        normalized_budgets = {}
         for month, categories in data["budgets"].items():
-            date.fromisoformat(month + "-01")
+            month = finance.normalize_month(month)
+            normalized_budgets.setdefault(month, {}).update(categories)
             for amount in categories.values():
                 finance.money(amount)
+        data["budgets"] = normalized_budgets
         return data
 
     def guard(self, action):
@@ -153,7 +157,7 @@ class FinanceApp(ttk.Frame):
             value = tk.StringVar(value=default)
             if label == "Date (YYYY-MM-DD)":
                 field = DatePicker(form, value)
-            elif label in ("First month (YYYY-MM)", "Last month (YYYY-MM)"):
+            elif label in ("Month (YYYY-MM)", "First month (YYYY-MM)", "Last month (YYYY-MM)"):
                 field = DatePicker(form, value, month_only=True)
             elif label == "Category":
                 field = ttk.Combobox(form, textvariable=value, width=26,
@@ -291,8 +295,8 @@ class FinanceApp(ttk.Frame):
         self.categories = self.table(tab, ("Category", "Expenses", "Budget", "Status"))
 
     def set_budget(self):
-        month = self.month.get().strip()
-        date.fromisoformat(month + "-01")
+        month = finance.normalize_month(self.month.get())
+        self.month.set(month)
         category = self.budget["Category"].get().strip()
         if not category:
             raise ValueError("Enter a category.")
@@ -321,7 +325,8 @@ class FinanceApp(ttk.Frame):
             self.categories.delete(*self.categories.get_children())
 
     def refresh_summary(self):
-        month = self.month.get().strip()
+        month = finance.normalize_month(self.month.get())
+        self.month.set(month)
         income, expenses, net, categories = finance.summary(self.data, month)
         self.totals.set(f'{self.data["currency"]}   Income: {income:,.2f}   Expenses: {expenses:,.2f}   Net: {net:,.2f}')
         self.categories.delete(*self.categories.get_children())
