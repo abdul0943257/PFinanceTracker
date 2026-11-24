@@ -21,6 +21,7 @@ class FinanceApp(ttk.Frame):
         root.minsize(900, 650)
         self.pack(fill="both", expand=True)
         self.data = self.load_data()
+        self.category_dropdowns = []
         self.status = tk.StringVar(value="Ready. Your data stays on this computer.")
         header = ttk.Frame(self)
         header.pack(fill="x", pady=(0, 14))
@@ -76,9 +77,24 @@ class FinanceApp(ttk.Frame):
         for row, (label, default) in enumerate(specs):
             ttk.Label(form, text=label).grid(row=row, column=0, sticky="w", padx=(0, 14), pady=4)
             value = tk.StringVar(value=default)
-            ttk.Entry(form, textvariable=value, width=28).grid(row=row, column=1, sticky="w", pady=4)
+            if label == "Category":
+                field = ttk.Combobox(form, textvariable=value, width=26,
+                                     values=self.category_choices())
+                self.category_dropdowns.append(field)
+            else:
+                field = ttk.Entry(form, textvariable=value, width=28)
+            field.grid(row=row, column=1, sticky="w", pady=4)
             values[label] = value
         return values
+
+    def category_choices(self):
+        categories = {"Food", "Housing", "Transport", "Utilities", "Healthcare",
+                      "Education", "Entertainment", "Shopping", "Savings",
+                      "Salary", "Freelance", "Investments", "Gifts", "Other"}
+        categories.update(item["category"] for item in self.data["transactions"])
+        for budgets in self.data["budgets"].values():
+            categories.update(budgets)
+        return sorted(categories, key=str.casefold)
 
     def button(self, parent, label, action):
         ttk.Button(parent, text=label, command=self.guard(action)).pack(anchor="w", pady=(0, 12))
@@ -164,6 +180,9 @@ class FinanceApp(ttk.Frame):
         self.status.set(f"Report saved to {path}")
 
     def refresh(self):
+        choices = self.category_choices()
+        for dropdown in self.category_dropdowns:
+            dropdown.configure(values=choices)
         self.transactions.delete(*self.transactions.get_children())
         for item in sorted(self.data["transactions"], key=lambda item: item["date"], reverse=True):
             self.transactions.insert("", "end", values=(item["date"], item["category"], item["type"], f'{Decimal(item["amount"]):,.2f}'))
