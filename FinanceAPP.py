@@ -16,21 +16,23 @@ import PFinanceTracker as finance
 class DatePicker(ttk.Frame):
     """Read-only date display with a calendar built from standard Tk widgets."""
 
-    def __init__(self, parent, variable):
+    def __init__(self, parent, variable, month_only=False):
         super().__init__(parent)
         self.variable = variable
+        self.month_only = month_only
         self.popup = None
         ttk.Entry(self, textvariable=variable, state="readonly", width=17).pack(side="left")
-        ttk.Button(self, text="Pick date…", command=self.open_calendar).pack(side="left", padx=(6, 0))
+        ttk.Button(self, text="Pick month…" if month_only else "Pick date…", command=self.open_calendar).pack(side="left", padx=(6, 0))
 
     def open_calendar(self):
         if self.popup is not None and self.popup.winfo_exists():
             self.popup.lift()
             return
-        selected = date.fromisoformat(self.variable.get())
+        value = self.variable.get()
+        selected = date.fromisoformat(value + "-01" if self.month_only else value) if value else date.today()
         self.year, self.month = selected.year, selected.month
         self.popup = tk.Toplevel(self)
-        self.popup.title("Choose transaction date")
+        self.popup.title("Choose month" if self.month_only else "Choose transaction date")
         self.popup.transient(self.winfo_toplevel())
         self.popup.resizable(False, False)
         self.popup.bind("<Escape>", lambda event: self.popup.destroy())
@@ -44,6 +46,9 @@ class DatePicker(ttk.Frame):
         self.following.pack(side="left")
         self.days = ttk.Frame(self.popup, padding=8)
         self.days.pack()
+        if self.month_only:
+            ttk.Button(self.popup, text="Select this month",
+                       command=lambda: self.select_date(date(self.year, self.month, 1))).pack(pady=(0, 8))
         ttk.Button(self.popup, text="Today", command=lambda: self.select_date(date.today())).pack(pady=(0, 8))
         self.draw_month()
         self.popup.grab_set()
@@ -64,7 +69,8 @@ class DatePicker(ttk.Frame):
         self.following.configure(state="disabled" if (self.year, self.month) == (9999, 12) else "normal")
         for column, name in enumerate(("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")):
             ttk.Label(self.days, text=name, anchor="center").grid(row=0, column=column)
-        selected = date.fromisoformat(self.variable.get())
+        value = self.variable.get()
+        selected = date.fromisoformat(value + "-01" if self.month_only else value) if value else date.today()
         for row, week in enumerate(calendar.Calendar().monthdayscalendar(self.year, self.month), 1):
             for column, day in enumerate(week):
                 if day:
@@ -76,7 +82,7 @@ class DatePicker(ttk.Frame):
                         button.state(["pressed"])
 
     def select_date(self, chosen):
-        self.variable.set(chosen.isoformat())
+        self.variable.set(chosen.strftime("%Y-%m") if self.month_only else chosen.isoformat())
         self.popup.destroy()
 
 
@@ -147,6 +153,8 @@ class FinanceApp(ttk.Frame):
             value = tk.StringVar(value=default)
             if label == "Date (YYYY-MM-DD)":
                 field = DatePicker(form, value)
+            elif label in ("First month (YYYY-MM)", "Last month (YYYY-MM)"):
+                field = DatePicker(form, value, month_only=True)
             elif label == "Category":
                 field = ttk.Combobox(form, textvariable=value, width=26,
                                      values=self.category_choices())
@@ -198,15 +206,64 @@ class FinanceApp(ttk.Frame):
 
     def build_transactions(self):
         tab = self.tab("Transactions")
+        self.editing_index = None
         self.entry = self.fields(tab, [("Date (YYYY-MM-DD)", date.today().isoformat()), ("Category", ""), ("Amount", "")])
         self.kind = tk.StringVar(value="expense")
         ttk.Combobox(tab, textvariable=self.kind, values=("expense", "income"), state="readonly", width=25).pack(anchor="w", pady=(0, 10))
-        self.button(tab, "Add transaction", self.add_transaction)
+        actions = ttk.Frame(tab)
+        actions.pack(anchor="w", pady=(0, 12))
+        self.add_button = ttk.Button(actions, text="Add transaction", command=self.guard(self.add_transaction))
+        self.add_button.pack(side="left", padx=(0, 8))
+        ttk.Button(actions, text="Edit selected", command=self.guard(self.edit_transaction)).pack(side="left", padx=(0, 8))
+        self.update_button = ttk.Button(actions, text="Save changes", state="disabled", command=self.guard(self.update_transaction))
+        self.update_button.pack(side="left", padx=(0, 8))
+        self.cancel_button = ttk.Button(actions, text="Cancel edit", state="disabled", command=self.cancel_edit)
+        self.cancel_button.pack(side="left")
         self.button(tab, "Import CSV…", self.import_csv)
         ttk.Label(tab, text="CSV columns: date, category, amount, type. Importing the same file again adds duplicates.").pack(anchor="w", pady=(0, 8))
         self.transactions = self.table(tab, ("Date", "Category", "Type", "Amount"))
+        self.transactions.configure(selectmode="browse")
+        self.transactions.bind("<Double-1>", lambda event: self.guard(self.edit_transaction)())
+
+    def edit_transaction(self):
+        selected = self.transactions.selection()
+        if not selected:
+            raise ValueError("Select a transaction in the table to edit.")
+        self.editing_index = int(selected[0])
+        item = self.data["transactions"][self.editing_index]
+        self.entry["Date (YYYY-MM-DD)"].set(item["date"])
+        self.entry["Category"].set(item["category"])
+        self.entry["Amount"].set(item["amount"])
+        self.kind.set(item["type"])
+        self.add_button.configure(state="disabled")
+        self.update_button.configure(state="normal")
+        self.cancel_button.configure(state="normal")
+        self.status.set("Editing selected transaction. Update the form, then click Save changes.")
+
+    def update_transaction(self):
+        if self.editing_index is None:
+            raise ValueError("Select a transaction and click Edit selected first.")
+        item = finance.transaction(self.entry["Date (YYYY-MM-DD)"].get().strip(), self.entry["Category"].get(), self.entry["Amount"].get().strip(), self.kind.get())
+        data = copy.deepcopy(self.data)
+        data["transactions"][self.editing_index] = item
+        self.commit(data)
+        self.cancel_edit()
+        self.status.set("Transaction updated and saved.")
+
+    def cancel_edit(self):
+        self.editing_index = None
+        self.add_button.configure(state="normal")
+        self.update_button.configure(state="disabled")
+        self.cancel_button.configure(state="disabled")
+        self.entry["Date (YYYY-MM-DD)"].set(date.today().isoformat())
+        self.entry["Category"].set("")
+        self.entry["Amount"].set("")
+        self.kind.set("expense")
+        self.status.set("Ready to add a new transaction.")
 
     def add_transaction(self):
+        if self.editing_index is not None:
+            raise ValueError("Save or cancel the current edit before adding a transaction.")
         item = finance.transaction(self.entry["Date (YYYY-MM-DD)"].get().strip(), self.entry["Category"].get(), self.entry["Amount"].get().strip(), self.kind.get())
         data = copy.deepcopy(self.data)
         data["transactions"].append(item)
@@ -254,8 +311,8 @@ class FinanceApp(ttk.Frame):
         for dropdown in self.category_dropdowns:
             dropdown.configure(values=choices)
         self.transactions.delete(*self.transactions.get_children())
-        for item in sorted(self.data["transactions"], key=lambda item: item["date"], reverse=True):
-            self.transactions.insert("", "end", values=(item["date"], item["category"], item["type"], f'{Decimal(item["amount"]):,.2f}'))
+        for index, item in sorted(enumerate(self.data["transactions"]), key=lambda pair: pair[1]["date"], reverse=True):
+            self.transactions.insert("", "end", iid=str(index), values=(item["date"], item["category"], item["type"], f'{Decimal(item["amount"]):,.2f}'))
         # A user may be editing the month while saving a transaction.
         try:
             self.refresh_summary()
