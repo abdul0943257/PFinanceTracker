@@ -355,7 +355,7 @@ class FinanceApp(ttk.Frame):
         canvas = FigureCanvasTkAgg(figure, master=area)
         canvas.get_tk_widget().pack(fill="both", expand=True)
         return axes, canvas
-
+# Save the charts as PNG
     def save_chart(self, figure, title):
         path = filedialog.asksaveasfilename(
             parent=self.root,
